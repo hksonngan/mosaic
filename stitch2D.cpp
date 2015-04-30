@@ -1,50 +1,35 @@
-ï»¿// stitch2D.cpp : ì½˜ì†” ì‘ìš© í”„ë¡œê·¸ë¨ì— ëŒ€í•œ ì§„ì…ì ì„ ì •ì˜í•©ë‹ˆë‹¤.
-// 2014.3.2 : haison
+// stitch2D.cpp : ÄÜ¼Ö ÀÀ¿ë ÇÁ·Î±×·¥¿¡ ´ëÇÑ ÁøÀÔÁ¡À» Á¤ÀÇÇÕ´Ï´Ù.
 
 #include <iostream>
-using namespace std;
 #include <math.h>
+#include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <stdio.h>  // defines FILENAME_MAX 
+#include <direct.h> //_getcwd
+
+
+using namespace std;
+
+#define IMAGE_YD		(int) 3008			//Å¸°Ù ¹× ¼Ò½º¿µ»ó ³ôÀÌ
+#define IMAGE_XD		(int) 3072			//Å¸°Ù ¹× ¼Ò½º¿µ»ó Æø
+#define IMAGE_PITCH		(double) 0.148		//Å¸°Ù ¹× ¼Ò½º¿µ»ó ÇÈ¼¿ ÇÇÄ¡ (mm)
+#define IMAGE_BITS		(int) 16			//Å¸°Ù ¹× ¼Ò½º¿µ»ó ºñÆ®¼ö
+#define GetCurrentDir _getcwd
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #include <vips/vips.h>
 #include <vips/util.h>
 #include <vips/colour.h>
 #include <vips/region.h>
 #include <vips/rect.h>
 
-#define NUM_FILES 1000
-#define MAXPOINTS 60
-#define DIRSLASHWIN '\\'          
-#define DIRSLASHUNIX '/'          
+#include <libxml/parser.h>
 
-int xoverlap;
-int yoverlap;
-
-/*
-extern int im_lrmerge();
-extern int im_updatehist();
-extern int im_merge_analysis();
-extern int im__find_lroverlap();
-extern int im__find_tboverlap();
-*/
-
-static int file_ptr = 0;
-static IMAGE *in[ NUM_FILES ];
-
-/* Strategy: build a tree describing the sequence of joins we want. Walk the
- * tree assigning temporary file names, compile the tree into a linear
- * sequence of join commands.
- */
-
-/* Decoded file name info.
- */
-static char *file_root = NULL;
-static char *output_file = NULL;
-static int width = 0;		/* Number of frames across */
-static int height = 0;		/* Number of frames down */
-
-static int file_list[ NUM_FILES ];
+#define DIRSLASHWIN '\\'
+#define DIRSLASHUNIX '/'
 
 static char *
 remove_ext_tiff( char *name )
@@ -65,19 +50,19 @@ remove_ext_tiff( char *name )
     return( out );
 }
 
-static void * malloc_dr_die(size_t size)
+static void * malloc_or_die( size_t size )
 {
-	void * p;
-	p = malloc(size);
-	if(p == NULL)
-	{
+    void * p;
+    p = malloc( size );
+    if( p == NULL )
+    {
 #ifdef PRINT_MALLOC_ERRS
-		fprintf(stderr, "Couldn't get memory (%u bytes)\n", (unsigned int)size);
+        fprintf( stderr, "Couldn't get memory (%u bytes)\n", ( unsigned int )size );
 #endif
-		exit(1);
-		return NULL; /* Won't actually return... */
-	}
-	return p;
+        exit( 1 );
+        return NULL; /* Won't actually return... */
+    }
+    return p;
 }
 
 /* Find the root name of a file name. Return new, shorter, string.
@@ -85,29 +70,29 @@ static void * malloc_dr_die(size_t size)
 static char *
 find_directory( char *file )
 {
-	char *dirname;
-	char *lastslash;
-	int   len;
+    char *dirname;
+    char *lastslash;
+    int   len;
 
-	lastslash = strrchr(file, DIRSLASHWIN);
-	len =  (lastslash == NULL) ? 0 : (int) (lastslash - file);
-	dirname = (char *) malloc_dr_die (sizeof(char) * (len+2));
-	
-	if (len > 0)
-		strncpy(dirname, file, len);
-	else if (*file != DIRSLASHWIN) 
-	{ 
-		*dirname = '.';      
-		len = 1; 
-	}
-	else                        
-	{ 
-		*dirname = DIRSLASHWIN; 
-		len = 1; 
-	}
-	
-	dirname[len] = '\0';
-	return dirname;
+    lastslash = strrchr( file, DIRSLASHWIN );
+    len =  ( lastslash == NULL ) ? 0 : ( int ) ( lastslash - file );
+    dirname = ( char * ) malloc_or_die ( sizeof( char ) * ( len + 2 ) );
+
+    if ( len > 0 )
+        strncpy( dirname, file, len );
+    else if ( *file != DIRSLASHWIN )
+    {
+        *dirname = '.';
+        len = 1;
+    }
+    else
+    {
+        *dirname = DIRSLASHWIN;
+        len = 1;
+    }
+
+    dirname[len] = '\0';
+    return dirname;
 }
 
 /* Find the root name of a file name. Return new, shorter, string.
@@ -151,15 +136,15 @@ find_x( char *name )
     char *out;
     out = _strdup( name );
 
- /* Find '.nxm'.
-     */
+    /* Find '.nxm'.
+        */
     if( !( p = strrchr( out, '.' ) ) )
     {
-		im_error( "stitch2d", "Bad argument '%s'", name );
+        im_error( "stitch2d", "Bad argument '%s'", name );
         free( out );
         return( -1 );
     }
-	/* Read out x posn.
+    /* Read out x posn.
      */
     if( sscanf_s( p, ".%dx%*d", &n ) != 1 )
     {
@@ -181,12 +166,12 @@ find_y( char *name )
     char *p;
     char *out = _strdup( name );
 
-	if( !( p = strrchr( out, '.' ) ) )
-	{
-		im_error( "stitch2d", "Bad argument '%s'", name );
-		free( out );
-		return( -1 );
-	}
+    if( !( p = strrchr( out, '.' ) ) )
+    {
+        im_error( "stitch2d", "Bad argument '%s'", name );
+        free( out );
+        return( -1 );
+    }
     /* Read out y posn.
      */
     if( sscanf_s( p, ".%*dx%d", &m ) != 1 )
@@ -202,7 +187,6 @@ find_y( char *name )
 
 }
 #endif /*__cplusplus*/
-
 
 class image2D
 {
@@ -236,9 +220,9 @@ private:
     int bits_count;       //16, 12, 8 ...
 };
 
-//ì˜ìƒ ì¶•ì†Œ: ì˜ìƒì˜ pixel í¬ê¸°ë¥¼ sc ë§Œí¼ í‚¤ì›€ (scëŠ” 1, 2, 4, 8, .. ë“± 2ì˜ power)
-//í‰ê· ì´ ì•„ë‹Œ ë‹¨ìˆœ sampling ë°©ë²• ì‚¬ìš©
-//xd, yd, scaleë„ ë”°ë¼ì„œ ë³€ë™
+//¿µ»ó Ãà¼Ò: ¿µ»óÀÇ pixel Å©±â¸¦ sc ¸¸Å­ Å°¿ò (sc´Â 1, 2, 4, 8, .. µî 2ÀÇ power)
+//Æò±ÕÀÌ ¾Æ´Ñ ´Ü¼ø sampling ¹æ¹ı »ç¿ë
+//xd, yd, scaleµµ µû¶ó¼­ º¯µ¿
 void image2D::image_shrink( int sc )
 {
     unsigned short **image_shrink;
@@ -248,7 +232,7 @@ void image2D::image_shrink( int sc )
     t_yd = yd / sc;
     t_xd = xd / sc;
 
-    //ì¶•ì†Œ ì˜ìƒ ì €ì¥ ì˜ì—­ í• ë‹¹
+    //Ãà¼Ò ¿µ»ó ÀúÀå ¿µ¿ª ÇÒ´ç
     image_shrink = new unsigned short *[t_yd];
     for ( int y = 0; y < t_yd; y++ )
         image_shrink[y] = new unsigned short[t_xd];
@@ -258,22 +242,22 @@ void image2D::image_shrink( int sc )
         for ( int x = 0; x < t_xd; x++ )
             image_shrink[y][x] = image[y * sc][x * sc];
 
-    //ë©”ëª¨ë¦¬ í•´ì œ: image
+    //¸Ş¸ğ¸® ÇØÁ¦: image
     for ( int y = 0; y < yd; y++ ) delete image[y];
 
-    //ë³€ìˆ˜ê°’ ì¬í• ë‹¹
+    //º¯¼ö°ª ÀçÇÒ´ç
     yd = t_yd;
     xd = t_xd;
     scale *= sc;
 
-    //ì¶•ì†Œëœ ì˜ìƒì„ imageì— ì¬í• ë‹¹
+    //Ãà¼ÒµÈ ¿µ»óÀ» image¿¡ ÀçÇÒ´ç
     image = image_shrink;
 
 }
 
 
 
-// image2D ìƒì„±ì: ë¹ˆ ê³µê°„ image[ ][ ] ìƒì„±
+// image2D »ı¼ºÀÚ: ºó °ø°£ image[ ][ ] »ı¼º
 image2D::image2D( int n, int m, int sc, int bits ):
     yd( n ), xd( m ), scale( sc ), bits_count( bits )
 {
@@ -289,7 +273,7 @@ image2D::image2D( int n, int m, int sc, int bits ):
 
 }
 
-// image2D ìƒì„±ì: 1ì°¨ì› ë°°ì—´ì—ì„œ image[ ][ ] ìƒì„±
+// image2D »ı¼ºÀÚ: 1Â÷¿ø ¹è¿­¿¡¼­ image[ ][ ] »ı¼º
 image2D::image2D( unsigned short *data, int n, int m, int sc, int bits ):
     yd( n ), xd( m ), scale( sc ), bits_count( bits )
 {
@@ -310,7 +294,7 @@ image2D::image2D( unsigned short *data, int n, int m, int sc, int bits ):
 
 }
 
-//ì˜ìƒì—ì„œ 0ì¸ ë ˆë²¨ì„ 1ë¡œ ëª¨ì¡°ë¦¬ ë°”ê¿ˆ: íƒ€ê²Ÿì˜ìƒì—ë§Œ ì ìš©í•˜ë©°, mutual informatioon ê³„ì‚°ì‹œ íƒ€ê²Ÿì˜ìƒ ë°–ì— ìˆëŠ” í”½ì…€ì˜ ë ˆë²¨ì„ 0ìœ¼ë¡œ í•˜ê³  ê³„ì‚°ì—ì„œ ì œì™¸í•˜ê¸° ìœ„í•¨
+//¿µ»ó¿¡¼­ 0ÀÎ ·¹º§À» 1·Î ¸ğÁ¶¸® ¹Ù²Ş: Å¸°Ù¿µ»ó¿¡¸¸ Àû¿ëÇÏ¸ç, mutual informatioon °è»ê½Ã Å¸°Ù¿µ»ó ¹Û¿¡ ÀÖ´Â ÇÈ¼¿ÀÇ ·¹º§À» 0À¸·Î ÇÏ°í °è»ê¿¡¼­ Á¦¿ÜÇÏ±â À§ÇÔ
 void image2D::lower_bounding_image_values( int lb )
 {
 
@@ -321,7 +305,7 @@ void image2D::lower_bounding_image_values( int lb )
 }
 
 
-//ë§¤ì¹­ìš© 2ì°¨ì› ì˜ìƒ ì´ë™ (trs_y, trs_x)
+//¸ÅÄª¿ë 2Â÷¿ø ¿µ»ó ÀÌµ¿ (trs_y, trs_x)
 void image2D::transformation2D( image2D& match, int trs_y, int trs_x )
 {
 
@@ -330,35 +314,33 @@ void image2D::transformation2D( image2D& match, int trs_y, int trs_x )
     int    sc;
     int    t_xd, t_yd;
 
-    t_xd = this->xd;  //xdë¡œ ì¨ë„ ë˜ì§€ë§Œ, ì´í•´ë¥¼ ì‰½ê²Œ í•˜ê¸°
+    t_xd = this->xd;  //xd·Î ½áµµ µÇÁö¸¸, ÀÌÇØ¸¦ ½±°Ô ÇÏ±â
     t_yd = this->yd;  //
     sc = match.scale;
 
-    //match ì˜ìƒ í‰í–‰ì´ë™(trs_x, trs_y)
+    //match ¿µ»ó ÆòÇàÀÌµ¿(trs_x, trs_y)
     for ( int y = 0; y < match.yd; y++ )
         for ( int x = 0; x < match.xd; x++ )
         {
             x_m = ( x * sc + trs_x );
             y_m = ( y * sc + trs_y );
 
-            //íƒ€ê²Ÿì˜ìƒ(this)ì—ì„œ í”½ì…€ê°’ ê°€ì ¸ì˜¤ê¸°
-            // í”½ì…€ê°’ì´ 0ì¸ ê²½ìš°ëŠ” ê²½ê³„ ì™¸ë¶€ í”½ì…€ì¸ ê²½ìš°ì— í•´ë‹¹: íƒ€ê²Ÿ ì˜ìƒì€ lower boundê°€ 1ë¡œ ë˜ì–´ ìˆê¸°ì—..
-            if ( ( y_m < t_yd ) && 
-				 ( x_m < t_xd ) && 
-				 ( x_m >= 0 )   && 
-				 ( y_m >= 0 ) ) 
-				val = this->image[y_m][x_m];
-            else 
-				val = 0;
+            //Å¸°Ù¿µ»ó(this)¿¡¼­ ÇÈ¼¿°ª °¡Á®¿À±â
+            // ÇÈ¼¿°ªÀÌ 0ÀÎ °æ¿ì´Â °æ°è ¿ÜºÎ ÇÈ¼¿ÀÎ °æ¿ì¿¡ ÇØ´ç: Å¸°Ù ¿µ»óÀº lower bound°¡ 1·Î µÇ¾î ÀÖ±â¿¡..
+            if ( ( y_m < t_yd ) &&
+                    ( x_m < t_xd ) &&
+                    ( x_m >= 0 )   &&
+                    ( y_m >= 0 ) )
+                val = this->image[y_m][x_m];
+            else
+                val = 0;
 
             match.image[y][x] = val;
         }
 
 }
 
-
-
-//2ê°œì˜ ì˜ìƒê°„ mutual information ê³„ì‚°
+//2°³ÀÇ ¿µ»ó°£ mutual information °è»ê
 double image2D::mutualinformation( image2D& match, int bins )
 {
     int image_bits;
@@ -391,10 +373,11 @@ double image2D::mutualinformation( image2D& match, int bins )
             if ( val_m > 0 )
             {
 
-                if ( this->bits_count > match.bits_count ) 
-					image_bits = this->bits_count;
-                else 
-					image_bits = match.bits_count;
+                if ( this->bits_count > match.bits_count )
+                    image_bits = this->bits_count;
+                else
+                    image_bits = match.bits_count;
+
                 // convert image_bits to log_2(bins) bits
                 if ( bins < ( 2 << ( image_bits - 1 ) ) )
                 {
@@ -439,7 +422,7 @@ double image2D::mutualinformation( image2D& match, int bins )
 
     mi = 0.0;
 
-    //mutual information ê³„ì‚°
+    //mutual information °è»ê
     for ( int l = 0; l < bins; l++ )
         for ( int m = 0; m < bins; m++ )
         {
@@ -448,8 +431,8 @@ double image2D::mutualinformation( image2D& match, int bins )
                     mi += j_hist[l][m] * log( j_hist[l][m] / ( prob_x[l] * prob_y[m] ) );
         }
 
-    for ( int i = 0; i < bins; i++ ) 
-		delete j_hist[i];
+    for ( int i = 0; i < bins; i++ )
+        delete j_hist[i];
     delete j_hist;
     delete prob_x;
     delete prob_y;
@@ -459,33 +442,34 @@ double image2D::mutualinformation( image2D& match, int bins )
 
 
 
-//Mutual informationì„ ì´ìš©í•œ ì˜ìƒ ë§¤ì¹­
-//1. cropì˜ìƒê³¼ ë™ì¼í•œ í¬ê¸°ì˜ match ì˜ìƒ ìƒì„±
-//2. match ì˜ìƒì˜ ì¢Œë£Œë¥¼ 2D ë³€í™˜í•˜ë©´ì„œ íƒ€ê²Ÿì˜ìƒ(this->image)ì—ì„œ í”½ì…€ê°’ ê°€ì ¸ì˜¤ê¸°
-//3. crop vs match ì˜ìƒì˜ mutual information ê³„ì‚°
-//4. miì˜ gradient search ë°©ë²• ì‚¬ìš©í•˜ì—¬ ìµœì  2D ë³€í™˜ê°’ search
+//Mutual informationÀ» ÀÌ¿ëÇÑ ¿µ»ó ¸ÅÄª
+//1. crop¿µ»ó°ú µ¿ÀÏÇÑ Å©±âÀÇ match ¿µ»ó »ı¼º
+//2. match ¿µ»óÀÇ ÁÂ·á¸¦ 2D º¯È¯ÇÏ¸é¼­ Å¸°Ù¿µ»ó(this->image)¿¡¼­ ÇÈ¼¿°ª °¡Á®¿À±â
+//3. crop vs match ¿µ»óÀÇ mutual information °è»ê
+//4. miÀÇ gradient search ¹æ¹ı »ç¿ëÇÏ¿© ÃÖÀû 2D º¯È¯°ª search
 void image2D::mi_gradient_matching( image2D& crop, int& trs_y, int& trs_x, int max_trs, int iter_bound, int bins )
 {
 
     int MAX_TRS = 1;
     int MIN_TRS = 1;
 
-    //MAX_TRS ê²°ì •
-    // 1, 2, 4, 8, 16, 32, 64, ... ì¤‘ì—ì„œ max_trs ì´í•˜ì¸ ìµœëŒ€ê°’ ì„ ì •
+    //MAX_TRS °áÁ¤
+    // 1, 2, 4, 8, 16, 32, 64, ... Áß¿¡¼­ max_trs ÀÌÇÏÀÎ ÃÖ´ë°ª ¼±Á¤
     do
     {
-        if ( max_trs > MAX_TRS ) MAX_TRS *= 2;
+        if ( max_trs > MAX_TRS )
+            MAX_TRS *= 2;
     }
     while ( ( 2 * MAX_TRS ) <= max_trs );
 
-    //ì¤‘ê°„ê³¼ 4-nearest neighborì˜ ì¢Œí‘œê°’ ì„¤ì •
+    //Áß°£°ú 4-nearest neighborÀÇ ÁÂÇ¥°ª ¼³Á¤
     int trs_step_x[5] = {0, MAX_TRS,       0, -MAX_TRS,        0};
     int trs_step_y[5] = {0,       0, MAX_TRS,        0, -MAX_TRS};
 
     double mi[5], mi_max, pre_mi_max;
     int    mi_max_index, iter = 0;
 
-    //match ì˜ìƒìš© ê°ì²´ ìƒì„±: cropê³¼ í¬ê¸° ë° ë³€ìˆ˜ ë™ì¼
+    //match ¿µ»ó¿ë °´Ã¼ »ı¼º: crop°ú Å©±â ¹× º¯¼ö µ¿ÀÏ
     image2D match( crop.yd, crop.xd, crop.scale, crop.bits_count );
 
     pre_mi_max = mi_max = 0.0;
@@ -496,18 +480,19 @@ void image2D::mi_gradient_matching( image2D& crop, int& trs_y, int& trs_x, int m
         mi_max_index = 0;
         for ( int i = 0; i < 5; i++ )
         {
-            //íƒ€ê²Ÿ(this)ì—ì„œ 2D ë³€í™˜ëœ match ì˜ìƒ ìƒì„±
+            //Å¸°Ù(this)¿¡¼­ 2D º¯È¯µÈ match ¿µ»ó »ı¼º
             this->transformation2D( match, trs_y + trs_step_y[i], trs_x + trs_step_x[i] );
-            //cropê³¼ matchì˜ mi ê³„ì‚°
+            //crop°ú matchÀÇ mi °è»ê
             mi[i] = crop.mutualinformation( match, bins );
-            //mi ìµœëŒ€ë°©í–¥ search
+            //mi ÃÖ´ë¹æÇâ search
             if ( mi[i] > mi_max )
             {
                 mi_max_index = i;
                 mi_max = mi[i];
             }
         }
-        //mi ìµœëŒ€ ì¦ê°€ ë°©í–¥ìœ¼ë¡œ 2D ë³€ìˆ˜ ì´ë™
+
+        //mi ÃÖ´ë Áõ°¡ ¹æÇâÀ¸·Î 2D º¯¼ö ÀÌµ¿
         trs_y += trs_step_y[mi_max_index];
         trs_x += trs_step_x[mi_max_index];
 
@@ -515,7 +500,7 @@ void image2D::mi_gradient_matching( image2D& crop, int& trs_y, int& trs_x, int m
 
         iter++;
 
-        //mi ë³€í™”ê°€ ì—†ìœ¼ë©´, step ë³€í™”í­ì„ 1/2ë¡œ ì¤„ì„
+        //mi º¯È­°¡ ¾øÀ¸¸é, step º¯È­ÆøÀ» 1/2·Î ÁÙÀÓ
         if ( !( mi_max > pre_mi_max ) )
         {
             for ( int i = 0; i < 5; i++ )
@@ -537,8 +522,8 @@ image2D::~image2D()
 
 }
 
-//ë‘ ì˜ìƒì„ stitchingí•˜ì—¬ raw ë°ì´í„°ë¥¼ íŒŒì¼ì— ì €ì¥
-//mode = 0: ìì—°ìŠ¤ëŸ½ê²Œ stitching, 1: íƒ€ê²Ÿ ê°•ì¡°, 2: ì†ŒìŠ¤ ê°•ì¡°
+//µÎ ¿µ»óÀ» stitchingÇÏ¿© raw µ¥ÀÌÅÍ¸¦ ÆÄÀÏ¿¡ ÀúÀå
+//mode = 0: ÀÚ¿¬½º·´°Ô stitching, 1: Å¸°Ù °­Á¶, 2: ¼Ò½º °­Á¶
 void	image2D::saving_stiching_result( image2D& source, int trans_y, int trans_x, char *filename, int mode )
 {
     if ( ( trans_y < this->yd ) && ( trans_y >= 0 ) && ( trans_x > ( -this->xd / 5 ) ) && ( trans_x < ( this->xd / 5 ) ) )
@@ -549,34 +534,34 @@ void	image2D::saving_stiching_result( image2D& source, int trans_y, int trans_x,
         unsigned short temp = 0, v_t, v_s, val;
         double  r_t, r_s;
 
-        sum_yd = this->yd + trans_y;  		  //stitchingì˜ìƒ í¬ê¸°
-        sum_xd = this->xd + abs( trans_x );	 //stitchingì˜ìƒ í¬ê¸°
+        sum_yd = this->yd + trans_y;  		  //stitching¿µ»ó Å©±â
+        sum_xd = this->xd + abs( trans_x );	 //stitching¿µ»ó Å©±â
 
-        cout << "í•©ì¹œ ì˜ìƒ : (" << sum_xd << ", " << sum_yd << ")" << endl;
+        cout << "ÇÕÄ£ ¿µ»ó : (" << sum_xd << ", " << sum_yd << ")" << endl;
 
         FILE *fp;
-		errno_t error_fd; 
-		error_fd = fopen_s(&fp, filename, "wb" );
+        errno_t error_fd;
+        error_fd = fopen_s( &fp, filename, "wb" );
 
-        //íƒ€ê²Ÿ ì˜ìƒì¤‘ ì†ŒìŠ¤ ì˜ìƒê³¼ ê²¹ì¹˜ì§€ ì•ŠëŠ” ë¶€ë¶„ ì €ì¥
+        //Å¸°Ù ¿µ»óÁß ¼Ò½º ¿µ»ó°ú °ãÄ¡Áö ¾Ê´Â ºÎºĞ ÀúÀå
         for ( int y = 0; y < trans_y; y++ )
         {
             if ( trans_x >= 0 )
             {
-                for ( int x = 0; x < this->xd; x++ ) 
-					fwrite( &this->image[y][x], sizeof( unsigned short ), 1, fp );
-                for ( int x = 0; x < trans_x; x++ ) 
-					fwrite( &temp, sizeof( unsigned short ), 1, fp );
+                for ( int x = 0; x < this->xd; x++ )
+                    fwrite( &this->image[y][x], sizeof( unsigned short ), 1, fp );
+                for ( int x = 0; x < trans_x; x++ )
+                    fwrite( &temp, sizeof( unsigned short ), 1, fp );
             }
             else
             {
-                for ( int x = trans_x; x < 0; x++ ) 
-					fwrite( &temp, sizeof( unsigned short ), 1, fp );
-                for ( int x = 0; x < this->xd; x++ ) 
-					fwrite( &this->image[y][x], sizeof( unsigned short ), 1, fp );
+                for ( int x = trans_x; x < 0; x++ )
+                    fwrite( &temp, sizeof( unsigned short ), 1, fp );
+                for ( int x = 0; x < this->xd; x++ )
+                    fwrite( &this->image[y][x], sizeof( unsigned short ), 1, fp );
             }
         }
-        //íƒ€ê²Ÿ ì˜ìƒê³¼ ì†ŒìŠ¤ ì˜ìƒì´ ê²¹ì¹˜ëŠ” ë¶€ë¶„ ìì—°ìŠ¤ëŸ½ê²Œ weightë¥¼ ì¤˜ì„œ ì €ì¥
+        //Å¸°Ù ¿µ»ó°ú ¼Ò½º ¿µ»óÀÌ °ãÄ¡´Â ºÎºĞ ÀÚ¿¬½º·´°Ô weight¸¦ Áà¼­ ÀúÀå
         for ( int y = trans_y; y < this->yd; y++ )
         {
             r_t = ( y - trans_y ) / ( double )( this->yd - trans_y ); //never 0 on denominator (trans_y < this->yd)
@@ -584,12 +569,12 @@ void	image2D::saving_stiching_result( image2D& source, int trans_y, int trans_x,
 
             if ( mode == 1 )
             {
-                r_t = 0.0;    // íƒ€ê²Ÿ ê°•ì¡°
+                r_t = 0.0;    // Å¸°Ù °­Á¶
                 r_s = 1.0;
             }
             else if ( mode == 2 )
             {
-                r_t = 1.0;    //ì†ŒìŠ¤ ê°•ì¡°
+                r_t = 1.0;    //¼Ò½º °­Á¶
                 r_s = 0.0;
             }
 
@@ -630,22 +615,22 @@ void	image2D::saving_stiching_result( image2D& source, int trans_y, int trans_x,
                 }
             }
         }
-        //ì†ŒìŠ¤ì˜ìƒì¤‘ íƒ€ê²Ÿì˜ìƒê³¼ ê²¹ì¹˜ì§€ ì•ŠëŠ” ë¶€ë¶„ ì €ì¥
+        //¼Ò½º¿µ»óÁß Å¸°Ù¿µ»ó°ú °ãÄ¡Áö ¾Ê´Â ºÎºĞ ÀúÀå
         for ( int y = ( this->yd - trans_y ); y < this->yd; y++ )
         {
             if ( trans_x >= 0 )
             {
-                for ( int x = 0; x < trans_x; x++ ) 
-					fwrite( &temp, sizeof( unsigned short ), 1, fp );
-                for ( int x = 0; x < this->xd; x++ ) 
-					fwrite( &source.image[y][x], sizeof( unsigned short ), 1, fp );
+                for ( int x = 0; x < trans_x; x++ )
+                    fwrite( &temp, sizeof( unsigned short ), 1, fp );
+                for ( int x = 0; x < this->xd; x++ )
+                    fwrite( &source.image[y][x], sizeof( unsigned short ), 1, fp );
             }
             else
             {
-                for ( int x = 0; x < this->xd; x++ ) 
-					fwrite( &source.image[y][x], sizeof( unsigned short ), 1, fp );
-                for ( int x = trans_x; x < 0; x++ ) 
-					fwrite( &temp, sizeof( unsigned short ), 1, fp );
+                for ( int x = 0; x < this->xd; x++ )
+                    fwrite( &source.image[y][x], sizeof( unsigned short ), 1, fp );
+                for ( int x = trans_x; x < 0; x++ )
+                    fwrite( &temp, sizeof( unsigned short ), 1, fp );
 
             }
         }
@@ -653,351 +638,375 @@ void	image2D::saving_stiching_result( image2D& source, int trans_y, int trans_x,
     }
 }
 
-//íƒ€ê²Ÿ ì˜ìƒê³¼ ì†ŒìŠ¤ì˜ìƒì„ ë§¤ì¹­í•˜ëŠ” ì£¼ ì•Œê³ ë¦¬ì¦˜
-//ì†ŒìŠ¤ì˜ìƒì˜ í”½ì…€í”¼ì¹˜ì™€ overlap í¬ê¸°ë¥¼ ê³ ë ¤í•˜ì—¬ ë§¤ì¹­ìš© crop ì˜ìƒ ìƒì„±
-//crop ì˜ìƒ ìƒì„±ì‹œ overlapì´ 60mmë³´ë‹¤ í¬ë©´ 60mmì— í•´ë‹¤í•˜ëŠ” ì •ë„ê¹Œì§€ë§Œ ìƒì„±
-//crop ì˜ìƒì€ ì¶•ì†Œí•´ì„œ ê³„ì‚°ë¶€ë‹´ì„ ì¤„ì„
-//ìµœì¢…ìœ¼ë¡œ íƒ€ê²Ÿ (0,0) ìœ„ì¹˜ ëŒ€ë¹„ crop ì˜ìƒì˜ ë§¤ì¹­ìœ„ì¹˜(trans_y, trans_x) ëŒë ¤ì¤Œ
+//Å¸°Ù ¿µ»ó°ú ¼Ò½º¿µ»óÀ» ¸ÅÄªÇÏ´Â ÁÖ ¾Ë°í¸®Áò
+//¼Ò½º¿µ»óÀÇ ÇÈ¼¿ÇÇÄ¡¿Í overlap Å©±â¸¦ °í·ÁÇÏ¿© ¸ÅÄª¿ë crop ¿µ»ó »ı¼º
+//crop ¿µ»ó »ı¼º½Ã overlapÀÌ 60mmº¸´Ù Å©¸é 60mm¿¡ ÇØ´ÙÇÏ´Â Á¤µµ±îÁö¸¸ »ı¼º
+//crop ¿µ»óÀº Ãà¼ÒÇØ¼­ °è»êºÎ´ãÀ» ÁÙÀÓ
+//ÃÖÁ¾À¸·Î Å¸°Ù (0,0) À§Ä¡ ´ëºñ crop ¿µ»óÀÇ ¸ÅÄªÀ§Ä¡(trans_y, trans_x) µ¹·ÁÁÜ
 void image2D::stiching_2images( image2D& source, int& trans_y, int& trans_x, double pixel_pitch, double overlap )
 {
     int crop_yd;
 
-    //íƒ€ê²Ÿ ì˜ìƒì—ì„œ í”½ì…€ê°’ì´ 0ì¸ ê²½ìš° +1 shift: í”½ì…€ì´ 0ì¸ ê²½ìš°ëŠ” ê²½ê³„ë°–ì— í• ë‹¹í•˜ê³  mutual information ê³„ì‚°ì—ì„œ ì œì™¸
+    //Å¸°Ù ¿µ»ó¿¡¼­ ÇÈ¼¿°ªÀÌ 0ÀÎ °æ¿ì +1 shift: ÇÈ¼¿ÀÌ 0ÀÎ °æ¿ì´Â °æ°è¹Û¿¡ ÇÒ´çÇÏ°í mutual information °è»ê¿¡¼­ Á¦¿Ü
     this->lower_bounding_image_values( 1 );
 
-    //ì†ŒìŠ¤ ì˜ìƒì—ì„œ ë§¤ì¹­ìš© ì˜ìƒ(crop) ê°€ì ¸ì˜¤ê¸°: ë†’ì´ crop_yd
-    if ( overlap < 60.0 ) crop_yd = ( int )( overlap / pixel_pitch ); // ìµœëŒ€ 60mm ë†’ì´ê¹Œì§€ë§Œ ë§¤ì¹­ì— ì‚¬ìš©
-    else crop_yd = ( int )( 60.0 / pixel_pitch );
-    if ( crop_yd > source.yd ) crop_yd = source.yd; // í˜¹ì‹œ, crop ë†’ì´ê°€ ì†ŒìŠ¤ ë†’ì´ë³´ë‹¤ ì»¤ì§€ëŠ” ê²½ìš° ì–µì œ
+    //¼Ò½º ¿µ»ó¿¡¼­ ¸ÅÄª¿ë ¿µ»ó(crop) °¡Á®¿À±â: ³ôÀÌ crop_yd
+    if ( overlap < 60.0 )
+    {
+        crop_yd = ( int )( overlap / pixel_pitch ); // ÃÖ´ë 60mm ³ôÀÌ±îÁö¸¸ ¸ÅÄª¿¡ »ç¿ë
+    }
+    else
+    {
+        crop_yd = ( int )( 60.0 / pixel_pitch );
+    }
+
+    if ( crop_yd > source.yd )
+    {
+        crop_yd = source.yd; // È¤½Ã, crop ³ôÀÌ°¡ ¼Ò½º ³ôÀÌº¸´Ù Ä¿Áö´Â °æ¿ì ¾ïÁ¦
+    }
+
     image2D crop( crop_yd, source.xd, source.scale, source.bits_count );
-    cout << "Crop ì˜ìƒ : (" << crop.get_xd() << ", " << crop.get_yd() << "), scale = " << crop.get_scale() <<  endl;
+    cout << "Crop ¿µ»ó : (" << crop.get_xd() << ", " << crop.get_yd() << "), scale = " << crop.get_scale() <<  endl;
 
-    //cropì˜ìƒ ê°€ì ¸ì˜¤ê¸°
+    //crop¿µ»ó °¡Á®¿À±â
     for ( int y = 0; y < crop_yd; y++ )
+    {
         for ( int x = 0; x < source.xd; x++ )
+        {
             crop.image[y][x] = source.image[y][x];
+        }
+    }
 
-    //crop ì˜ìƒ ì¶•ì†Œ: scale=1,2,4,8,16, ....
+    //crop ¿µ»ó Ãà¼Ò: scale=1,2,4,8,16, ....
     crop.image_shrink( 4 ); //USER OPT *************************.
-    cout << "Crop ì¶•ì†Œ : (" << crop.get_xd() << ", " << crop.get_yd() << "), scale = " << crop.get_scale() <<  endl;
+    cout << "Crop Ãà¼Ò : (" << crop.get_xd() << ", " << crop.get_yd() << "), scale = " << crop.get_scale() <<  endl;
 
-    //crop ì˜ìƒì„ 2D ì´ë™í•˜ëŠ” ì´ˆê¸°ê°’ ì„¤ì •
-    // íƒ€ê²Ÿ ì˜ìƒ í•˜ë‹¨ê³¼ ì†ŒìŠ¤ì˜ìƒ ìƒë‹¨(crop) ì¤‘ì²©ë¶€ì˜ ê²¹ì¹¨(overlap)ì„ ëŒ€ê°• íŒŒì•…í•˜ì—¬ íƒ€ê²Ÿ í•˜ë‹¨ì— cropë¶€ ë§ì¶¤
+    //crop ¿µ»óÀ» 2D ÀÌµ¿ÇÏ´Â ÃÊ±â°ª ¼³Á¤
+    // Å¸°Ù ¿µ»ó ÇÏ´Ü°ú ¼Ò½º¿µ»ó »ó´Ü(crop) ÁßÃ¸ºÎÀÇ °ãÄ§(overlap)À» ´ë°­ ÆÄ¾ÇÇÏ¿© Å¸°Ù ÇÏ´Ü¿¡ cropºÎ ¸ÂÃã
     trans_x = this->get_xd() / 2 - ( crop.get_xd() / 2 * crop.get_scale() );
     trans_y = this->get_yd()   - ( int )( overlap / pixel_pitch );
 
-    cout << "ì´ˆê¸° ë§¤ì¹­ ìœ„ì¹˜ : (" << trans_x << ", " << trans_y << ")" << endl;
+    cout << "ÃÊ±â ¸ÅÄª À§Ä¡ : (" << trans_x << ", " << trans_y << ")" << endl;
 
-    int 	max_trs = ( int )( 8.0 / pixel_pitch ); //USER OPT******.  ë§¤ì¹­ì¹˜ ìœ„ì¹˜ íŒŒë¼ë¯¸í„° ì—…ë°ì´íŠ¸ stepì€ ìµœëŒ€ 8mmë¡œ í•¨ (ê²½í—˜ì¹˜)
-    int     iteration = 50;                       //USER OPT******. ë§¤ì¹­ ì•Œê³ ë¦¬ì¦˜ ë°˜ë³µìˆ˜
-    int     histogram_bins = 128;             //USER OPT******. mutual information ê³„ì‚°ì‹œ íˆìŠ¤í† ê·¸ë¨ bin ìˆ˜
+    int 	max_trs = ( int )( 8.0 / pixel_pitch ); //USER OPT******.  ¸ÅÄªÄ¡ À§Ä¡ ÆÄ¶ó¹ÌÅÍ ¾÷µ¥ÀÌÆ® stepÀº ÃÖ´ë 8mm·Î ÇÔ (°æÇèÄ¡)
+    int     iteration = 50;                       //USER OPT******. ¸ÅÄª ¾Ë°í¸®Áò ¹İº¹¼ö
+    int     histogram_bins = 128;             //USER OPT******. mutual information °è»ê½Ã È÷½ºÅä±×·¥ bin ¼ö
 
-    //ì£¼ ë§¤ì¹­ í•¨ìˆ˜: cropì˜ìƒì„ íƒ€ê²Ÿì˜ìƒì— ë§¤ì¹­í•˜ê³  ë§¤ì¹­ê²°ê³¼ë¥¼(trans_y, trans_x) argumentsë¡œ ë¦¬í„´
+    //ÁÖ ¸ÅÄª ÇÔ¼ö: crop¿µ»óÀ» Å¸°Ù¿µ»ó¿¡ ¸ÅÄªÇÏ°í ¸ÅÄª°á°ú¸¦(trans_y, trans_x) arguments·Î ¸®ÅÏ
     this->mi_gradient_matching( crop, trans_y, trans_x, max_trs, iteration, histogram_bins );
 
-    cout << "ìµœì¢… ë§¤ì¹­ ìœ„ì¹˜ : (" << trans_x << ", " << trans_y << ")" << endl;
+    cout << "ÃÖÁ¾ ¸ÅÄª À§Ä¡ : (" << trans_x << ", " << trans_y << ")" << endl;
 }
-
-
-#define IMAGE_YD		(int) 3008			//íƒ€ê²Ÿ ë° ì†ŒìŠ¤ì˜ìƒ ë†’ì´
-#define IMAGE_XD		(int) 3072			//íƒ€ê²Ÿ ë° ì†ŒìŠ¤ì˜ìƒ í­
-#define IMAGE_PITCH		(double) 0.148		//íƒ€ê²Ÿ ë° ì†ŒìŠ¤ì˜ìƒ í”½ì…€ í”¼ì¹˜ (mm)
-#define IMAGE_BITS		(int) 16			//íƒ€ê²Ÿ ë° ì†ŒìŠ¤ì˜ìƒ ë¹„íŠ¸ìˆ˜
-
-#include <io.h>
-#include <fcntl.h>
-#include <sys/stat.h>
 
 int main( int argc, char **argv )
 {
-    
-    	//testmain(argc,argv);
-/*
-		IMAGE * out;
-    	int fd;
-    	errno_t errno;
-    	errno = _sopen_s(&fd, "teststitch2d.raw", _O_CREAT|_O_WRONLY|_O_BINARY|_O_TRUNC, _SH_DENYNO, _S_IREAD | _S_IWRITE);
-    	if( !( out = im_open( "tmp.v", "t" ) ) )
-            error_exit( "find_mosaic: unable to open file for output" );
+    if ( argc < 2 || ( strcmp( argv[1], "mosaic" ) != 0 &&
+                       strcmp( argv[1], "merge" ) != 0 ) )
+    {
+        return 1;
+    }
 
-    	im_raw2vips( "E:\\coreline-prj\\Stitch\\Stitch\\wholebody\\4-Knee.raw", out, IMAGE_XD, IMAGE_YD, 1, 0 );
-    	im_vips2tiff( out, "test.tiff" );
-    	im_vips2raw( out, fd );
-    	im_close( out );
-    	close(fd);
-*/    
-    
-	if (strcmp(argv[1], "mosaic") != 0 &&
-		strcmp(argv[1], "merge") != 0)
-	{
-		return 1;
-	}
+    if ( strcmp( argv[1], "mosaic" ) == 0 )
+    {
+        char name[ 1024 ];
+        char *file_root = NULL;
+        int fd_list_point_file;
+        errno_t err_no_pt_file;
+        int number_points = 0;
+        err_no_pt_file = _sopen_s( &fd_list_point_file, argv[2], _O_CREAT | _O_WRONLY | _O_TEXT | _O_TRUNC,
+                                   _SH_DENYNO,
+                                   _S_IREAD | _S_IWRITE );
+        for ( int i = 3; i < argc - 1; i++ )
+        {
+            IMAGE * img_convert;
+            int fd;
+            errno_t err_no;
+            char * output_file_v;
+            char * output_file_raw;
+            file_root = remove_ext_tiff( argv[i] );
+            if( !file_root )
+                error_exit( "error at file_root" );
+            im_snprintf( name, 1024, "%s.v", file_root );
+            output_file_v = _strdup( name );
 
-	if (strcmp(argv[1], "mosaic") == 0 )
-	{
-		char name[ 1024 ];
-		int fd_list_point_file;
-		errno_t err_no_pt_file;
-		int number_points = 0;
-		err_no_pt_file = _sopen_s(&fd_list_point_file, argv[2], _O_CREAT | _O_WRONLY | _O_TEXT |_O_TRUNC, 
-																_SH_DENYNO, 
-																_S_IREAD | _S_IWRITE);
-		for (int i = 3; i < argc - 1; i++)
+            im_snprintf( name, 1024, "%s.raw", file_root );
+            output_file_raw = _strdup( name );
+            if( !( img_convert = im_open( output_file_v, "w" ) ) )
+                error_exit( "find_mosaic: unable to open %s for input", output_file_v );
+
+            im_tiff2vips( argv[ i ], img_convert );
+
+            if ( _access( output_file_raw, 0 ) == -1 )
+            {
+                err_no = _sopen_s( &fd, output_file_raw, _O_CREAT | _O_WRONLY | _O_BINARY | _O_TRUNC, _SH_DENYNO, _S_IREAD | _S_IWRITE );
+                if ( img_convert->Bands > 1 )
+                {
+                    IMAGE * img_extract_band = im_open( "extract_band", "p" );
+                    im_extract_band( img_convert, img_extract_band, 0 );
+                    im_vips2raw( img_extract_band, fd );
+                    im_close( img_extract_band );
+                }
+                else
+                {
+                    im_vips2raw( img_convert, fd );
+                }
+                _close( fd );
+            }
+
+            FILE *fp;
+            unsigned short *data;
+
+            //Å¸°Ù ¿µ»ó ·Îµù: 1Â÷¿ø unsigned short ¹è¿­¿¡¼­ ÀĞ¾îµéÀÓ
+            //Å¸°Ù ¿µ»ó ÇÏ´Ü(¹è¿­ ÈÄ¹İºÎ)¿¡ ¾Æ·¡ÀÇ ¼Ò½º¿µ»ó »ó´Ü(¹è¿­ »ó¹İºÎ)ÀÌ ¸ÅÄªµÇ´Â ÇüÅÂÀÌ¾î¾ß ÇÔ
+            data = new unsigned short[img_convert->Ysize * img_convert->Xsize];
+            errno_t error_fd;
+            error_fd = fopen_s( &fp, output_file_raw, "rb" ); // "E:\\coreline-prj\\Stitch\\Stitch\\wholebody\\3-Hip.raw"
+            if ( fp != 0 )
+            {
+                for ( int i = 0; i < img_convert->Ysize * img_convert->Xsize; i++ )
+                    fread( &data[i], sizeof( unsigned short ), 1, fp );
+                cout << "Å¸°Ù ¿µ»ó ·Îµù: ";
+            }
+            else
+            {
+                cout << "Å¸°Ù ¿µ»ó ¾øÀ½!\n";
+                exit( 1 );
+            }
+
+            fclose( fp );
+
+            //data¸¦ ÀÌ¿ëÇÏ¿© image2D º¯¼ö target »ı¼º
+            image2D target( data, img_convert->Ysize, img_convert->Xsize, 1, IMAGE_BITS );
+            cout << "(" << target.get_xd() << ", " << target.get_yd() << "), scale = " << target.get_scale() <<  endl;
+
+            im_close( img_convert );
+
+            file_root = remove_ext_tiff( argv[i + 1] );
+            if( !file_root )
+                error_exit( "error at file_root" );
+            im_snprintf( name, 1024, "%s.v", file_root );
+            output_file_v = _strdup( name );
+
+            im_snprintf( name, 1024, "%s.raw", file_root );
+            output_file_raw = _strdup( name );
+            if( !( img_convert = im_open( output_file_v, "w" ) ) )
+                error_exit( "find_mosaic: unable to open %s for input", output_file_v );
+
+            im_tiff2vips( argv[i + 1], img_convert );
+            if ( _access( output_file_raw, 0 ) == -1 )
+            {
+                err_no = _sopen_s( &fd, output_file_raw, _O_CREAT | _O_WRONLY | _O_BINARY | _O_TRUNC, _SH_DENYNO, _S_IREAD | _S_IWRITE );
+                if ( img_convert->Bands > 1 )
+                {
+                    IMAGE * img_extract_band = im_open( "extract_band", "p" );
+                    im_extract_band( img_convert, img_extract_band, 0 );
+                    im_vips2raw( img_extract_band, fd );
+                    im_close( img_extract_band );
+                }
+                else
+                {
+                    im_vips2raw( img_convert, fd );
+                }
+                _close( fd );
+            }
+
+            //¼Ò½º ¿µ»ó ·Îµù: 1Â÷¿ø unsigned short ¹è¿­¿¡¼­ ÀĞ¾îµéÀÓ
+            //Å¸°Ù ¿µ»ó ÇÏ´ÜÀ» ¼Ò½º¿µ»ó »ó´ÜÀÌ ¸ÅÄªµÇ´Â ÇüÅÂÀÌ¾î¾ß ÇÔ
+            error_fd = fopen_s( &fp, output_file_raw, "rb" ); // "E:\\coreline-prj\\Stitch\\Stitch\\wholebody\\4-Knee.raw"
+            if ( fp != 0 )
+            {
+                for ( int i = 0; i < img_convert->Ysize * img_convert->Xsize; i++ )
+                    fread( &data[i], sizeof( unsigned short ), 1, fp );
+                cout << "¼Ò½º ¿µ»ó ·Îµù: ";
+            }
+            else
+            {
+                cout << "¼Ò½º ¿µ»ó ¾øÀ½!\n";
+                exit( 1 );
+            }
+            fclose( fp );
+            //data¸¦ ÀÌ¿ëÇÏ¿© image2D º¯¼ö source »ı¼º
+            image2D source( data, img_convert->Ysize, img_convert->Xsize, 1, IMAGE_BITS );
+            cout << "(" << source.get_xd() << ", " << source.get_yd() << "), scale = " << source.get_scale() <<  endl;
+
+            delete data;
+            im_close( img_convert );
+
+            int trans_x, trans_y;  // ¿µ»ó ÀÌµ¿ ÁÂÇ¥°ª
+            double pixel_pitch = IMAGE_PITCH; //µğÅØÅÍ ÇÈ¼¿ ÇÇÄ¡ (mm)
+            double overlap = 60.0; //¿¢½º¼± ÃÔ¿µ½Ã ¿µ»ó ¿À¹ö·¦ÀÇ ´«´ëÁß °ª (mm): ½ÇÁ¦°ª°ú 10~20mm ÀÌ»ó Â÷ÀÌ³ª¸é ¸ÅÄªÀÌ ¾î·Á¿ò // 60mm ÃßÃµ
+            int mode = 1;        // stitching °á°ú ÀúÀå ¹æ½Ä: 0 ¿À¹ö·¦ ºÎµå·´°Ô, 1 Å¸°Ù °­Á¶, 2 ¼Ò½º °­Á¶
+            target.stiching_2images( source, trans_y, trans_x, pixel_pitch, overlap );
+
+            char points[ 28 ];
+            char * output_point;
+            memset( points, 0, 28 );
+            im_snprintf( points, 28, "%d , %d\r\n", trans_x, trans_y );
+            output_point = _strdup( points );
+            _write( fd_list_point_file, output_point, strlen( output_point ) );
+            number_points = i - 3;
+
+            free( output_file_v );
+            free( output_file_raw );
+            //target.saving_stiching_result( source, trans_y, trans_x, "sum.raw", mode );
+        }
+
+        char total_points[ 128 ];
+        char * output_total_points;
+        memset( total_points, 0, 128 );
+        im_snprintf( total_points, 128, "Number of Point: %d", number_points + 1 );
+        output_total_points = _strdup( total_points );
+        _write( fd_list_point_file, output_total_points, strlen( output_total_points ) );
+        _close( fd_list_point_file );
+        free( file_root );
+        return 0;
+    }
+
+    if ( strcmp( argv[1], "merge" ) == 0 )
+    {
+		if (_access("stitchconfig.xml", 0) != -1)
 		{
-			IMAGE * img_convert;
-			int fd;
-			errno_t err_no;
-			char * output_file_v;
-			char * output_file_raw;
-			file_root = remove_ext_tiff( argv[i] );
-			if( !file_root )
-				error_exit( "error at file_root" );
-			im_snprintf( name, 1024, "%s.v", file_root );
-			output_file_v = _strdup( name );
-
-			im_snprintf( name, 1024, "%s.raw", file_root );
-			output_file_raw = _strdup( name );
-			if( !( img_convert = im_open( output_file_v, "w" ) ) )
-				error_exit( "find_mosaic: unable to open %s for input", output_file_v );
-
-			err_no = _sopen_s(&fd, output_file_raw, _O_CREAT|_O_WRONLY|_O_BINARY|_O_TRUNC, _SH_DENYNO, _S_IREAD | _S_IWRITE);
-
-			im_tiff2vips( argv[ i ], img_convert );
-			im_vips2raw(img_convert, fd);
-
-			FILE *fp;
-			unsigned short *data;
-
-
-			//íƒ€ê²Ÿ ì˜ìƒ ë¡œë”©: 1ì°¨ì› unsigned short ë°°ì—´ì—ì„œ ì½ì–´ë“¤ì„
-			//íƒ€ê²Ÿ ì˜ìƒ í•˜ë‹¨(ë°°ì—´ í›„ë°˜ë¶€)ì— ì•„ë˜ì˜ ì†ŒìŠ¤ì˜ìƒ ìƒë‹¨(ë°°ì—´ ìƒë°˜ë¶€)ì´ ë§¤ì¹­ë˜ëŠ” í˜•íƒœì´ì–´ì•¼ í•¨
-			data = new unsigned short[img_convert->Ysize * img_convert->Xsize];
-			errno_t error_fd; 
-			error_fd = fopen_s(&fp, output_file_raw, "rb" ); // "E:\\coreline-prj\\Stitch\\Stitch\\wholebody\\3-Hip.raw"
-			if ( fp != 0 )
+			char cCurrentPath[FILENAME_MAX];
+			LIBXML_TEST_VERSION
+			if (!GetCurrentDir(cCurrentPath, sizeof(cCurrentPath)))
 			{
-				for ( int i = 0; i < img_convert->Ysize * img_convert->Xsize; i++ ) 
-					fread( &data[i], sizeof( unsigned short ), 1, fp );
-				cout << "íƒ€ê²Ÿ ì˜ìƒ ë¡œë”©: ";
+				return errno;
 			}
-			else
-			{
-				cout << "íƒ€ê²Ÿ ì˜ìƒ ì—†ìŒ!\n";
-				exit( 1 );
-			}
+			cCurrentPath[sizeof(cCurrentPath) - 1] = '\0'; 
+			xmlDoc *doc;
+			xmlNode *node;
 
-			fclose( fp );
-
-			//dataë¥¼ ì´ìš©í•˜ì—¬ image2D ë³€ìˆ˜ target ìƒì„±
-			image2D target( data, img_convert->Ysize, img_convert->Xsize, 1, IMAGE_BITS );
-			cout << "(" << target.get_xd() << ", " << target.get_yd() << "), scale = " << target.get_scale() <<  endl;
-
-			_close(fd);
-			im_close(img_convert);
-
-			file_root = remove_ext_tiff( argv[i + 1] );
-			if( !file_root )
-				error_exit( "error at file_root" );
-			im_snprintf( name, 1024, "%s.v", file_root );
-			output_file_v = _strdup( name );
-
-			im_snprintf( name, 1024, "%s.raw", file_root );
-			output_file_raw = _strdup( name );
-			if( !( img_convert = im_open( output_file_v, "w" ) ) )
-				error_exit( "find_mosaic: unable to open %s for input", output_file_v );
-
-			err_no = _sopen_s(&fd, output_file_raw, _O_CREAT|_O_WRONLY|_O_BINARY|_O_TRUNC, _SH_DENYNO, _S_IREAD | _S_IWRITE);
-
-			im_tiff2vips(argv[i + 1], img_convert);
-			im_vips2raw(img_convert, fd);
-
-			//ì†ŒìŠ¤ ì˜ìƒ ë¡œë”©: 1ì°¨ì› unsigned short ë°°ì—´ì—ì„œ ì½ì–´ë“¤ì„
-			//íƒ€ê²Ÿ ì˜ìƒ í•˜ë‹¨ì„ ì†ŒìŠ¤ì˜ìƒ ìƒë‹¨ì´ ë§¤ì¹­ë˜ëŠ” í˜•íƒœì´ì–´ì•¼ í•¨
-			error_fd = fopen_s( &fp, output_file_raw, "rb" ); // "E:\\coreline-prj\\Stitch\\Stitch\\wholebody\\4-Knee.raw"
-			if ( fp != 0 )
-			{
-				for ( int i = 0; i < img_convert->Ysize * img_convert->Xsize; i++ ) 
-					fread( &data[i], sizeof( unsigned short ), 1, fp );
-				cout << "ì†ŒìŠ¤ ì˜ìƒ ë¡œë”©: ";
-			}
-			else
-			{
-				cout << "ì†ŒìŠ¤ ì˜ìƒ ì—†ìŒ!\n";
-				exit( 1 );
-			}
-			fclose( fp );
-			//dataë¥¼ ì´ìš©í•˜ì—¬ image2D ë³€ìˆ˜ source ìƒì„±
-			image2D source( data, img_convert->Ysize, img_convert->Xsize, 1, IMAGE_BITS );
-			cout << "(" << source.get_xd() << ", " << source.get_yd() << "), scale = " << source.get_scale() <<  endl;
-
-			delete data;
-			_close(fd);
-			im_close(img_convert);
-
-			int trans_x, trans_y;  // ì˜ìƒ ì´ë™ ì¢Œí‘œê°’
-			double pixel_pitch = IMAGE_PITCH; //ë””í…í„° í”½ì…€ í”¼ì¹˜ (mm)
-			double overlap = 60.0; //ì—‘ìŠ¤ì„  ì´¬ì˜ì‹œ ì˜ìƒ ì˜¤ë²„ë©ì˜ ëˆˆëŒ€ì¤‘ ê°’ (mm): ì‹¤ì œê°’ê³¼ 10~20mm ì´ìƒ ì°¨ì´ë‚˜ë©´ ë§¤ì¹­ì´ ì–´ë ¤ì›€ // 60mm ì¶”ì²œ
-			int mode = 1;        // stitching ê²°ê³¼ ì €ì¥ ë°©ì‹: 0 ì˜¤ë²„ë© ë¶€ë“œëŸ½ê²Œ, 1 íƒ€ê²Ÿ ê°•ì¡°, 2 ì†ŒìŠ¤ ê°•ì¡°
-			target.stiching_2images( source, trans_y, trans_x, pixel_pitch, overlap );
-
-			char points[ 28 ];
-			char * output_point;
-			memset(points, 0, 28);
-			im_snprintf( points, 28, "%d %d\r\n", trans_x, trans_y );
-			output_point = _strdup( points );
-			_write( fd_list_point_file, output_point, strlen( output_point ) );
-			number_points = i - 3;
-			//target.saving_stiching_result( source, trans_y, trans_x, "sum.raw", mode );
+			// Cleanup function for the XML library.
+			xmlCleanupParser();
 		}
 
-		char total_points[ 8 ];
-		char * output_total_points;
-		memset(total_points, 0, 8);
-		im_snprintf( total_points, 8, "Number of Point: %d\r\n", number_points + 1 );
-		output_total_points = _strdup( total_points );
-		_write( fd_list_point_file, output_total_points, strlen( output_total_points ) );
-		_close( fd_list_point_file );
-		return 0;
-	}
+        char *file_root = NULL;
+        int number_of_point = atoi( argv[2] );
+        int k = 0;
+        IMAGE * tmpOut[6];
+        IMAGE * tmpOut1[6];
+        IMAGE * sourceimg;
+        IMAGE * targetimg;
 
+#if 0
+        if( !( tmpOut = im_open( "tmpOut.v", "p" ) ) ||
+                !( tmpOut1 = im_open( "tmpOut1.v", "p" ) ) )
+            error_exit( "stitch2d: unable to open file for output" );
+#endif
+        for ( int i = argc - 1; i > argc - ( number_of_point + 1 ); i-- )
+        {
+            char name[1024];
+            char * output_file_v;
+            int trans_x, trans_y;
+            file_root = remove_ext_tiff( argv[ i - 1 ] );
+            if( !file_root )
+                error_exit( "error at file_root" );
+            im_snprintf( name, 1024, "%s.v", file_root );
+            output_file_v = _strdup( name );
+            if ( k <= number_of_point )
+            {
+                trans_x = find_x( argv[ 2 + number_of_point - k ] );
+                trans_y = find_y( argv[ 2 + number_of_point - k ] );
+            }
 
-	if (strcmp(argv[1], "merge") == 0 )
-	{
-		int number_of_point = atoi(argv[2]);
-		int k = 0;
-		for ( int i = argc - 1; i > argc - ( number_of_point + 1 ); i-- )
-		{
-			char name[1024];
-			char * output_file_v;
-			int trans_x, trans_y;
-			file_root = remove_ext_tiff( argv[ i - 1 ] );
-			if( !file_root )
-				error_exit( "error at file_root" );
-			im_snprintf( name, 1024, "%s.v", file_root );
-			output_file_v = _strdup( name );
-			if ( k <= number_of_point )
-			{
-				trans_x = find_x( argv[ 2 + number_of_point - k ] );
-				trans_y = find_y( argv[ 2 + number_of_point - k ] );
-			}
-			k++;
+            if ( _access( output_file_v, 0 ) == -1 )
+            {
+                IMAGE * save_Out;
+                if( !( save_Out = im_open( output_file_v , "w" ) ) )
+                    error_exit( "stitch2d: unable to open file for output" );
+                im_tiff2vips( argv[ i - 1 ], save_Out ); //, IMAGE_XD, IMAGE_YD, 1, 0 );
+                im_close( save_Out );
+            }
 
-			IMAGE * sourceimg;
-			IMAGE * targetimg;
-			IMAGE * tmpOut;
-			IMAGE * tmpOut1;
-			IMAGE * tmpOut2;
+            if( !( sourceimg = im_open( output_file_v , "r" ) ) )
+                error_exit( "stitch2d: unable to open file for output" );
 
-			if ( _access( output_file_v, 0 ) == -1)
-			{
-				IMAGE * save_Out;
-				if( !( save_Out = im_open( output_file_v , "w" ) ) ) // "E:\\coreline-prj\\Stitch\\Stitch\\wholebody\\3-Hip.v"
-					error_exit( "stitch2d: unable to open file for output" );
-				im_tiff2vips( argv[ i - 1 ], save_Out ); //, IMAGE_XD, IMAGE_YD, 1, 0 );
-				im_close( save_Out );
-			}
+            if ( k == 0 )
+            {
+                im_open_local_array( sourceimg, tmpOut, 6, "tmpOut.v", "p" ) ;
+                im_open_local_array( sourceimg, tmpOut1, 6, "tmpOut1.v", "p" );
+            }
 
-			if( !( sourceimg = im_open( output_file_v , "r" ) ) ) // "E:\\coreline-prj\\Stitch\\Stitch\\wholebody\\3-Hip.v"
-			    error_exit( "stitch2d: unable to open file for output" );
-			//im_tiff2vips( argv[i - 1], sourceimg ); //, IMAGE_XD, IMAGE_YD, 1, 0 );
-			
-			////////// SRC IMAGE ////////////
+            ////////// SRC IMAGE ////////////
 
-			char * directory = find_directory(argv[i]);				
-			char * output_file_i_v; 
-			im_snprintf( name, 1024, "%s\\temp__%d.v", directory, i + 1 );
-			free(directory);
-			output_file_i_v = _strdup( name );
-			
-			if ( _access( output_file_i_v, 0 ) != -1)
-			{
-				output_file_v = _strdup(name);
-				if( !( targetimg = im_open( output_file_v, "r" ) ) )
-					error_exit( "stitch2d: unable to open file for output" );
-				//IMAGE * temporary_img;
-				//temporary_img = im_open(output_file_i_v, "r");
-				//im_copy( temporary_img, targetimg ); //, IMAGE_XD, IMAGE_YD, 1, 0 );
-				//im_close(temporary_img);
-			}
-			else
-			{
+            if ( k > 0 && tmpOut1[k - 1]->Ysize > sourceimg->Ysize ) //( _access( output_file_i_v, 0 ) != -1)
+            {
+#if 0
+#endif
+            }
+            else
+            {
 
-				file_root = remove_ext_tiff( argv[ i ] );
-				if( !file_root )
-					error_exit( "error at file_root" );
-				im_snprintf( name, 1024, "%s.v", file_root );
-				output_file_v = _strdup( name );
+                file_root = remove_ext_tiff( argv[ i ] );
+                if( !file_root )
+                    error_exit( "error at file_root" );
+                im_snprintf( name, 1024, "%s.v", file_root );
+                output_file_v = _strdup( name );
 
-				if ( _access( output_file_v, 0 ) == -1)
-				{
-					IMAGE * save_Out;
-					if( !( save_Out = im_open( output_file_v , "w" ) ) ) 
-						error_exit( "stitch2d: unable to open file for output" );
-					im_tiff2vips( argv[ i ], save_Out ); //, IMAGE_XD, IMAGE_YD, 1, 0 );
-					im_close( save_Out );
-				}
-				if( !( targetimg = im_open( output_file_v, "r" ) ) )
-					error_exit( "stitch2d: unable to open file for output" );
-				//im_tiff2vips( argv[ i ], targetimg ); //, IMAGE_XD, IMAGE_YD, 1, 0 );
-			}
+                if ( _access( output_file_v, 0 ) == -1 )
+                {
+                    IMAGE * save_Out;
+                    if( !( save_Out = im_open( output_file_v , "w" ) ) )
+                        error_exit( "stitch2d: unable to open file for output" );
+                    im_tiff2vips( argv[ i ], save_Out ); //, IMAGE_XD, IMAGE_YD, 1, 0 );
+                    im_close( save_Out );
+                }
+                if( !( targetimg = im_open( output_file_v, "r" ) ) )
+                    error_exit( "stitch2d: unable to open file for output" );
+            }
 
-			//im_vips2tiff(targetimg, "E:\\coreline-prj\\Stitch\\Stitch\\wholebody\\4-Knee.tiff");
-	
-			/*
-				if( !( tmpOut2 = im_open( "E:\\coreline-prj\\Stitch\\Stitch\\wholebody\\4-Knee.v", "w" ) ) )
-					error_exit( "stitch2d: unable to open file for output" );
-				im_copy(targetimg , tmpOut2);
-				im_close(tmpOut2);
-			*/
-	
-			if( !( tmpOut = im_open( "tmpOut.v", "p" ) ) ||
-			        !( tmpOut1 = im_open( "tmpOut1.v", "p" ) ) )
-			    error_exit( "stitch2d: unable to open file for output" );
-	
-			im_tbmosaic( sourceimg, targetimg, tmpOut, 0, trans_x, trans_y, 0, 0, 5, 15, 0, 90 );
-	
-			//im_tbmerge(sourceimg, targetimg, tmpOut, 0 - trans_x, 0 - trans_y, 10 );
-	
-	//		im_tbmerge1(sourceimg, targetimg, tmpOut, trans_x, trans_y, trans_x + 500, trans_y, 0 , 0, 500, 0, 10 );
-			/*
-				if( !( tmpOut2 = im_open( "tmp3.v", "w" ) ) )
-					error_exit( "stitch2d: unable to open file for output" );
-				im_copy(tmpOut, tmpOut2);
-				im_close(tmpOut2);
-			*/
-			directory = find_directory(argv[i]);
-			im_snprintf( name, 1024, "%s\\temp__%d.v", directory, i );
-			free(directory);
-			output_file_i_v = _strdup( name );
+            if ( k > 0 && tmpOut1[k - 1]->Ysize > sourceimg->Ysize )
+            {
+// 				im_tbmosaic1( sourceimg, tmpOut1[k - 1], tmpOut[k], 0, trans_x, trans_y, 0, 0, 
+// 					trans_x + 400, trans_y + 400, 400, 400, 
+// 					5, 30, 0, 100 );
+                im_tbmosaic( sourceimg, tmpOut1[k - 1], tmpOut[k], 0, trans_x, trans_y, 0, 0, 5, 15, 0, 100 );
+                //im_tbmerge(sourceimg, tmpOut1[k - 1], tmpOut[k], 0 - trans_x, 0 - trans_y, 100 );
+            }
+            else
+            {
+// 				im_tbmosaic1( sourceimg, targetimg, tmpOut[k], 0, trans_x, trans_y, 0, 0, 
+// 					trans_x + 400, trans_y + 400, 0 + 400, 0 + 400, 
+// 					5, 30, 0, 100 );
+                im_tbmosaic( sourceimg, targetimg, tmpOut[k], 0, trans_x, trans_y, 0, 0, 5, 15, 0, 100 );
+                //im_tbmerge(sourceimg, targetimg, tmpOut[k], 0 - trans_x, 0 - trans_y, 100 );
+            }
 
-			if( !( tmpOut2 = im_open( output_file_i_v, "w" ) ) )
-			    error_exit( "stitch2d: unable to open file for output" );
-			im_copy(tmpOut, tmpOut2);
-			im_close(tmpOut2);
-#if 0	
-			im_global_balancef( tmpOut, tmpOut1, 0.8 );
-#endif	
-/*
-			int fdOut;
-			errno_t err;
-			err = _sopen_s( &fdOut, "teststitchHIP_KNEE.raw", _O_CREAT | _O_WRONLY | _O_BINARY | _O_TRUNC, _SH_DENYNO, _S_IREAD | _S_IWRITE );
-*/	
-	
-			im_vips2tiff( tmpOut, "teststitchHIP_KNEE_before_balance.tiff" );
-			im_close( tmpOut );
-	
-			//im_vips2tiff( tmpOut1, "teststitchHIP_KNEE.tiff" );
-	
-	//		im_vips2raw( tmpOut1, fdOut );
-	
-			im_close( sourceimg );
-			im_close( targetimg );
-			im_close( tmpOut1 );
+#if 1
+            im_global_balance( tmpOut[k], tmpOut1[k], 0.8 );
+#endif
 
-			free(output_file_i_v);
-			free(output_file_v);
-//			_close( fdOut );
-		}
-	}
+            k++;
+
+            free( output_file_v );
+        }
+
+        if ( k > 0 )
+        {
+#if 1
+            char name[1024];
+            char * directory = find_directory( argv[argc - 1] );
+            char * output_file_final_stitch_not_balance;
+            char * output_file_final_stitch;
+
+            im_snprintf( name, 1024, "%s\\finalstitch.tif", directory );
+            output_file_final_stitch = _strdup( name );
+
+            im_snprintf( name, 1024, "%s\\finalstitch_not_balance.tif", directory );
+            output_file_final_stitch_not_balance = _strdup( name );
+
+            im_vips2tiff( tmpOut[k - 1], output_file_final_stitch_not_balance );
+            im_vips2tiff( tmpOut1[k - 1], output_file_final_stitch );
+
+            free( directory );
+            free( output_file_final_stitch );
+            free( output_file_final_stitch_not_balance );
+#endif
+        }
+
+        im_close( sourceimg );
+        im_close( targetimg );
+        free( file_root );
+    }
     return 0;
 }
