@@ -43,7 +43,7 @@
           <Rhs vislevel="3" flags="7">
             <iImage window_x="1850" window_y="419" window_width="750" window_height="750" image_left="3312" image_top="3204" image_mag="-9" show_status="false" show_paintbox="false" show_convert="false" show_rulers="false" scale="1" offset="0" falsecolour="false" type="true"/>
             <Subcolumn vislevel="0"/>
-            <iText formula="Tasks_mosaic_item.Mosaic_1point_item.Top_bottom_item.action A1 A2"/>
+            <iText formula="Tasks_mosaic_item.Mosaic_1point_item.Top_bottom_item.action B2 B3"/>
           </Rhs>
         </Row>
       </Subcolumn>
